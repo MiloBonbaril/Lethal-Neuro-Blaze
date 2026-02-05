@@ -108,8 +108,21 @@ def run_temporal_test():
         # VISUALISATION POUR HUMAIN (DEBUG SEULEMENT)
         # Pour voir ce que le réseau voit, on affiche la dernière frame capturée (la plus récente)
         # Note : state[:, :, -1] est la frame la plus récente, state[:, :, 0] la plus vieille
-        latest_frame_view = state[:, :, -1] 
-        cv2.imshow('Neural Input (Latest Frame)', cv2.resize(latest_frame_view, (400, 400), interpolation=cv2.INTER_NEAREST))
+        latest = state[:, :, -1]
+        # Récupérer les 3 frames précédentes (0, 1, 2)
+        # Note : On suppose stack_size=4 ici (3 frames * 84px = 252px, ce qui correspond à 84*3)
+        others = [state[:, :, i] for i in range(state.shape[2]-1)]
+        
+        # Agrandissement de la dernière frame (84 * 3 = 252 de large)
+        big_view = cv2.resize(latest, (84*3, 84*3), interpolation=cv2.INTER_NEAREST)
+        
+        # Création de la bande du bas avec les anciennes frames
+        bottom_strip = np.hstack(others)
+        
+        # Assemblage vertical
+        composite_view = np.vstack((big_view, bottom_strip))
+        
+        cv2.imshow('Neural Input (Buffer View)', composite_view)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
