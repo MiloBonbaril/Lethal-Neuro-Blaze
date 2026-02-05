@@ -2,127 +2,143 @@ import numpy as np
 import cv2
 import mss
 import time
-from collections import deque
-
 import ctypes
 from ctypes import wintypes
+from collections import deque
 
-# Configuration
-MONITOR_ID = 1 
-
+# --- CONFIGURATION GÉNÉTIQUE ---
 WINDOW_TITLE = "LLBlaze"
+# Vos valeurs calibrées
+HP_ROI_RELATIVE = {'top': 76, 'left': 94, 'width': 190, 'height': 69}
+LOWER_YELLOW = np.array([27, 158, 151])
+UPPER_YELLOW = np.array([38, 246, 250])
 
+# --- FONCTIONS UTILITAIRES ---
 def get_game_window(title):
     user32 = ctypes.windll.user32
     handle = user32.FindWindowW(None, title)
-    
-    if not handle:
-        print(f"⚠️ Fenêtre '{title}' introuvable ! Utilisation de la configuration par défaut.")
-        return {"top": 100, "left": 100, "width": 800, "height": 600}
-
-    # Récupérer la zone client (sans les bordures)
+    if not handle: return None
     rect = wintypes.RECT()
     user32.GetClientRect(handle, ctypes.byref(rect))
-    
-    # Convertir les coordonnées locales (0,0) en coordonnées écran
     point = wintypes.POINT()
-    point.x = rect.left
-    point.y = rect.top
+    point.x = rect.left; point.y = rect.top
     user32.ClientToScreen(handle, ctypes.byref(point))
-    
-    return {
-        "top": point.y,
-        "left": point.x,
-        "width": rect.right - rect.left,
-        "height": rect.bottom - rect.top
-    }
+    return {"top": point.y, "left": point.x, "width": rect.right - rect.left, "height": rect.bottom - rect.top}
 
-GAME_WINDOW = get_game_window(WINDOW_TITLE)
+# --- CLASSE 1 : LE BIO-MONITEUR (Gestion de la Santé/Récompense) ---
+class BioMonitor:
+    def __init__(self, game_window_abs):
+        """
+        Gère la détection de la vie et le calcul de la récompense.
+        """
+        # Calcul des coordonnées absolues de la ROI de vie
+        self.monitor = {
+            "top": game_window_abs["top"] + HP_ROI_RELATIVE["top"],
+            "left": game_window_abs["left"] + HP_ROI_RELATIVE["left"],
+            "width": HP_ROI_RELATIVE["width"],
+            "height": HP_ROI_RELATIVE["height"]
+        }
+        
+        self.sct = mss.mss()
+        
+        # Buffer pour lisser le signal (Anti-Clignotement et Anti-VFX)
+        # 15 frames à ~30fps = 0.5 secondes de mémoire tampon
+        self.hp_buffer = deque(maxlen=15)
+        
+        # On stocke le nombre max de pixels possibles pour normaliser (0.0 à 1.0)
+        self.max_pixels = self.monitor["width"] * self.monitor["height"]
 
+    def read_hp(self):
+        """
+        Retourne le niveau de vie normalisé (0.0 à 1.0)
+        Utilise un Max-Pooling temporel pour filtrer le bruit.
+        """
+        # 1. Capture & Traitement
+        img = np.array(self.sct.grab(self.monitor))
+        img_bgr = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+        
+        # 2. Masquage
+        mask = cv2.inRange(hsv, LOWER_YELLOW, UPPER_YELLOW)
+        
+        # 3. Comptage brut
+        current_pixels = cv2.countNonZero(mask)
+        
+        # 4. Intégration dans le buffer temporel
+        self.hp_buffer.append(current_pixels)
+        
+        # 5. Filtrage (On prend le max des X dernières frames pour ignorer le clignotement)
+        smoothed_pixels = max(self.hp_buffer)
+        
+        # 6. Normalisation (Ratio entre 0 et 1)
+        # Note : On pourrait diviser par smoothed_pixels max observé au début de la partie 
+        # pour être plus précis, mais diviser par l'aire totale est une approximation sûre.
+        # On multiplie par un facteur arbitraire si la barre ne remplit pas tout le rectangle
+        # Pour l'instant, on renvoie le ratio brut par rapport à la taille de la zone.
+        hp_ratio = smoothed_pixels / self.max_pixels
+        
+        return hp_ratio, mask # On retourne le mask pour le debug
+
+# --- CLASSE 2 : LA RÉTINE (Déjà validée) ---
 class TemporalRetina:
     def __init__(self, bounding_box, stack_size=4):
         self.sct = mss.mss()
         self.monitor = bounding_box
         self.input_shape = (84, 84)
-        self.stack_size = stack_size
-        
-        # Le Buffer de mémoire à court terme (Short-term memory)
-        # deque avec maxlen éjecte automatiquement le plus vieux quand on ajoute un nouveau
         self.frames_buffer = deque(maxlen=stack_size)
-        
-        print(f"👁️ Rétine Temporelle initialisée. Stack: {stack_size} frames.")
+        self.stack_size = stack_size
 
-    def capture_frame(self):
-        """Capture une seule frame, la traite et la retourne."""
+    def get_state(self):
         sct_img = self.sct.grab(self.monitor)
         img = np.array(sct_img)
         gray = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
-        processed = cv2.resize(gray, self.input_shape)
-        return processed
-
-    def get_state(self):
-        """
-        Retourne l'état complet (Le Tenseur empilé).
-        Si le buffer n'est pas plein (début de partie), on le remplit avec la même image.
-        """
-        frame = self.capture_frame()
+        frame = cv2.resize(gray, self.input_shape)
         
-        # Initialisation : Si le buffer est vide, on le remplit avec la première frame x4
         if len(self.frames_buffer) == 0:
             for _ in range(self.stack_size):
                 self.frames_buffer.append(frame)
         else:
             self.frames_buffer.append(frame)
-        
-        # Empilement le long du canal de profondeur (channel axis)
-        # Format de sortie : (84, 84, 4)
-        # axis=2 pour empiler en profondeur (H, W, C)
-        stacked_state = np.stack(self.frames_buffer, axis=2)
-        
-        return stacked_state
+            
+        return np.stack(self.frames_buffer, axis=2)
 
-def run_temporal_test():
-    retina = TemporalRetina(GAME_WINDOW)
-    print("🧠 Cortex Visuel Temporel activé.")
+# --- CORPS PRINCIPAL (TEST D'INTÉGRATION) ---
+def run_full_sensory_test():
+    window_geo = get_game_window(WINDOW_TITLE)
+    if not window_geo:
+        print("❌ Jeu introuvable.")
+        return
+
+    print("🤖 Initialisation de l'organisme...")
+    eye = TemporalRetina(window_geo)
+    amygdala = BioMonitor(window_geo) # L'amygdale gère la peur (HP)
     
-    last_time = time.time()
-    frame_counter = 0
+    print("✅ Systèmes en ligne. Appuyez sur 'q' pour arrêter.")
     
     while True:
-        # C'est ici que la magie opère. 'state' contient maintenant le TEMPS.
-        state = retina.get_state()
+        # 1. Perception Visuelle
+        vision_state = eye.get_state()
         
-        # Vérification de la forme du tenseur (Crucial pour le Deep Learning)
-        # Doit afficher (84, 84, 4)
-        # print(f"Forme du tenseur d'entrée : {state.shape}") 
+        # 2. Perception Interne (Proprioception / Douleur)
+        hp_percent, hp_mask = amygdala.read_hp()
         
-        # Mesure FPS optimisée
-        frame_counter += 1
-        if frame_counter % 30 == 0: # On ne calcule pas à chaque frame pour économiser le CPU
-            current_time = time.time()
-            fps = 30 / (current_time - last_time)
-            last_time = current_time
-            # Afficher les FPS dans le titre de la fenêtre est moins coûteux que d'écrire sur l'image
-            print(f"Synaptic Hz: {fps:.2f} | Tensor Shape: {state.shape}")
-
-        # VISUALISATION POUR HUMAIN (DEBUG SEULEMENT)
-        # Pour voir ce que le réseau voit, on affiche la dernière frame capturée (la plus récente)
-        # Note : state[:, :, -1] est la frame la plus récente, state[:, :, 0] la plus vieille
-        latest = state[:, :, -1]
-        # Récupérer les 3 frames précédentes (0, 1, 2)
-        # Note : On suppose stack_size=4 ici (3 frames * 84px = 252px, ce qui correspond à 84*3)
-        others = [state[:, :, i] for i in range(state.shape[2]-1)]
+        # --- DEBUG VISUALISATION ---
+        # Vue Rétine (Dernière frame)
+        retina_view = cv2.resize(vision_state[:,:,-1], (300, 300), interpolation=cv2.INTER_NEAREST)
+        cv2.imshow("Cortex Visuel", retina_view)
         
-        # Agrandissement de la dernière frame (84 * 3 = 252 de large)
-        big_view = cv2.resize(latest, (84*3, 84*3), interpolation=cv2.INTER_NEAREST)
+        # Vue Amygdale (Masque de vie)
+        cv2.imshow("Amygdale (Detection Vie)", hp_mask)
         
-        # Création de la bande du bas avec les anciennes frames
-        bottom_strip = np.hstack(others)
+        # Affichage Console des signes vitaux
+        # On crée une fausse barre de progression en ASCII
+        bar_len = 20
+        filled_len = int(hp_percent * 100 / (100/bar_len)) # Approximation grossière pour l'affichage
+        # Note: Votre ratio sera surement faible (ex: 0.3) car la barre ne remplit pas tout le rectangle
+        # C'est normal. L'important est que ça baisse quand vous prenez des coups.
+        bar = '█' * filled_len + '-' * (bar_len - filled_len)
         
-        # Assemblage vertical
-        composite_view = np.vstack((big_view, bottom_strip))
-        
-        cv2.imshow('Neural Input (Buffer View)', composite_view)
+        print(f"\rSanté: [{bar}] Raw Ratio: {hp_percent:.4f}", end="")
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
@@ -130,4 +146,4 @@ def run_temporal_test():
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    run_temporal_test()
+    run_full_sensory_test()
