@@ -1,149 +1,168 @@
 import numpy as np
 import cv2
-import mss
 import time
-import ctypes
-from ctypes import wintypes
-from collections import deque
+import torch
+import os
 
-# --- CONFIGURATION GÉNÉTIQUE ---
+# Importation de vos organes
+from senses import TemporalRetina, BioMonitor, get_game_window
+from brain import MotorCortex, ACTION_MAP
+from agent import Agent
+
+# --- HYPERPARAMÈTRES DE L'EXPÉRIENCE ---
 WINDOW_TITLE = "LLBlaze"
-# Vos valeurs calibrées
-HP_ROI_RELATIVE = {'top': 76, 'left': 94, 'width': 190, 'height': 69}
-LOWER_YELLOW = np.array([27, 158, 151])
-UPPER_YELLOW = np.array([38, 246, 250])
+EPISODES = 500              # Nombre de parties à jouer
+MAX_STEPS_PER_EPISODE = 2000 # Sécurité pour éviter les boucles infinies
+SAVE_INTERVAL = 10          # Sauvegarder le cerveau tous les X épisodes
+MODEL_FILE = "neuro_blaze_v1.pth"
 
-# --- FONCTIONS UTILITAIRES ---
-def get_game_window(title):
-    user32 = ctypes.windll.user32
-    handle = user32.FindWindowW(None, title)
-    if not handle: return None
-    rect = wintypes.RECT()
-    user32.GetClientRect(handle, ctypes.byref(rect))
-    point = wintypes.POINT()
-    point.x = rect.left; point.y = rect.top
-    user32.ClientToScreen(handle, ctypes.byref(point))
-    return {"top": point.y, "left": point.x, "width": rect.right - rect.left, "height": rect.bottom - rect.top}
+# Récompenses (La chimie du plaisir et de la douleur)
+REWARD_SURVIVAL = 0.1       # Joie d'être en vie à chaque frame
+REWARD_DAMAGE = -50.0       # Douleur intense quand la vie baisse
+REWARD_DEATH = -100.0       # Traumatisme final
+REWARD_WIN = 100.0          # Extase de la victoire
 
-# --- CLASSE 1 : LE BIO-MONITEUR (Gestion de la Santé/Récompense) ---
-class BioMonitor:
-    def __init__(self, game_window_abs):
-        """
-        Gère la détection de la vie et le calcul de la récompense.
-        """
-        # Calcul des coordonnées absolues de la ROI de vie
-        self.monitor = {
-            "top": game_window_abs["top"] + HP_ROI_RELATIVE["top"],
-            "left": game_window_abs["left"] + HP_ROI_RELATIVE["left"],
-            "width": HP_ROI_RELATIVE["width"],
-            "height": HP_ROI_RELATIVE["height"]
-        }
-        
-        self.sct = mss.mss()
-        
-        # Buffer pour lisser le signal (Anti-Clignotement et Anti-VFX)
-        # 15 frames à ~30fps = 0.5 secondes de mémoire tampon
-        self.hp_buffer = deque(maxlen=15)
-        
-        # On stocke le nombre max de pixels possibles pour normaliser (0.0 à 1.0)
-        self.max_pixels = 900 # on Utilise 900 car c'est le nombre de pixels de la barre de vie. Sinon on devrait utiliser: self.monitor["width"] * self.monitor["height"]
+def transmute_state(numpy_state):
+    """
+    Transforme la perception brute (Numpy HWC) en influx nerveux (Torch CHW).
+    Entrée : (84, 84, 4) -> Sortie : (4, 84, 84)
+    """
+    # Transpose les axes : (2, 0, 1) met le canal (index 2) en premier
+    return numpy_state.transpose(2, 0, 1)
 
-    def read_hp(self):
-        """
-        Retourne le niveau de vie normalisé (0.0 à 1.0)
-        Utilise un Max-Pooling temporel pour filtrer le bruit.
-        """
-        # 1. Capture & Traitement
-        img = np.array(self.sct.grab(self.monitor))
-        img_bgr = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-        hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-        
-        # 2. Masquage
-        mask = cv2.inRange(hsv, LOWER_YELLOW, UPPER_YELLOW)
-        
-        # 3. Comptage brut
-        current_pixels = cv2.countNonZero(mask)
-        
-        # 4. Intégration dans le buffer temporel
-        self.hp_buffer.append(current_pixels)
-        
-        # 5. Filtrage (On prend le max des X dernières frames pour ignorer le clignotement)
-        smoothed_pixels = max(self.hp_buffer)
-        
-        # 6. Normalisation (Ratio entre 0 et 1)
-        # Note : On pourrait diviser par smoothed_pixels max observé au début de la partie 
-        # pour être plus précis, mais diviser par l'aire totale est une approximation sûre.
-        # On multiplie par un facteur arbitraire si la barre ne remplit pas tout le rectangle
-        # Pour l'instant, on renvoie le ratio brut par rapport à la taille de la zone.
-        hp_ratio = smoothed_pixels / self.max_pixels
-        
-        return hp_ratio, mask # On retourne le mask pour le debug
+def main():
+    print("🧬 INITIALISATION DU PROJET LETHAL NEURO-BLAZE...")
 
-# --- CLASSE 2 : LA RÉTINE (Déjà validée) ---
-class TemporalRetina:
-    def __init__(self, bounding_box, stack_size=4):
-        self.sct = mss.mss()
-        self.monitor = bounding_box
-        self.input_shape = (84, 84)
-        self.frames_buffer = deque(maxlen=stack_size)
-        self.stack_size = stack_size
-
-    def get_state(self):
-        sct_img = self.sct.grab(self.monitor)
-        img = np.array(sct_img)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
-        frame = cv2.resize(gray, self.input_shape)
-        
-        if len(self.frames_buffer) == 0:
-            for _ in range(self.stack_size):
-                self.frames_buffer.append(frame)
-        else:
-            self.frames_buffer.append(frame)
-            
-        return np.stack(self.frames_buffer, axis=2)
-
-# --- CORPS PRINCIPAL (TEST D'INTÉGRATION) ---
-def run_full_sensory_test():
-    window_geo = get_game_window(WINDOW_TITLE)
-    if not window_geo:
-        print("❌ Jeu introuvable.")
+    # 1. Connexion aux Organes Sensoriels
+    game_geo = get_game_window(WINDOW_TITLE)
+    if not game_geo:
+        print("❌ ERREUR CRITIQUE : Jeu introuvable. Lancez Lethal League Blaze.")
         return
 
-    print("🤖 Initialisation de l'organisme...")
-    eye = TemporalRetina(window_geo)
-    amygdala = BioMonitor(window_geo) # L'amygdale gère la peur (HP)
+    eye = TemporalRetina(game_geo)
+    amygdala = BioMonitor(game_geo)
+    muscles = MotorCortex()
     
-    print("✅ Systèmes en ligne. Appuyez sur 'q' pour arrêter.")
+    # 2. Naissance de l'Agent
+    # Input shape pour l'agent : (Channels, Height, Width)
+    input_shape = (4, 84, 84) 
+    num_actions = len(ACTION_MAP) # Devrait être 7 (0 à 6)
     
-    while True:
-        # 1. Perception Visuelle
-        vision_state = eye.get_state()
-        
-        # 2. Perception Interne (Proprioception / Douleur)
-        hp_percent, hp_mask = amygdala.read_hp()
-        
-        # --- DEBUG VISUALISATION ---
-        # Vue Rétine (Dernière frame)
-        retina_view = cv2.resize(vision_state[:,:,-1], (300, 300), interpolation=cv2.INTER_NEAREST)
-        cv2.imshow("Cortex Visuel", retina_view)
-        
-        # Vue Amygdale (Masque de vie)
-        cv2.imshow("Amygdale (Detection Vie)", hp_mask)
-        
-        # Affichage Console des signes vitaux
-        # On crée une fausse barre de progression en ASCII
-        bar_len = 20
-        filled_len = int(hp_percent * 100 / (100/bar_len)) # Approximation grossière pour l'affichage
-        # Note: Votre ratio sera surement faible (ex: 0.3) car la barre ne remplit pas tout le rectangle
-        # C'est normal. L'important est que ça baisse quand vous prenez des coups.
-        bar = '█' * filled_len + '-' * (bar_len - filled_len)
-        
-        print(f"\rSanté: [{bar}] Raw Ratio: {hp_percent:.4f}", end="")
+    neuro_agent = Agent(input_shape, num_actions)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+    # Chargement d'un cerveau existant si disponible (Transmigration)
+    if os.path.exists(MODEL_FILE):
+        print(f"📂 Cerveau existant détecté. Chargement des poids synaptiques...")
+        neuro_agent.load(MODEL_FILE)
+    else:
+        print(f"👶 Création d'un nouveau cerveau vierge.")
 
-    cv2.destroyAllWindows()
+    print(f"\n🧠 DÉBUT DE L'ENTRAÎNEMENT ({EPISODES} générations prévues)")
+    print("Passez sur la fenêtre du jeu. L'IA prend le contrôle dans 5 secondes...")
+    time.sleep(5)
+
+    # --- BOUCLE DES ÉPISODES (Générations) ---
+    for episode in range(1, EPISODES + 1):
+        # Reset de l'état pour une nouvelle partie
+        # On vide un peu le buffer visuel pour ne pas voir la partie d'avant
+        # Note: Idéalement, on devrait avoir une fonction reset() dans la rétine
+        print(f"--- Épisode {episode} ---")
+        
+        # On capture l'état initial
+        current_state = transmute_state(eye.get_state())
+        
+        last_hp = 1.0 # On commence full life (ou on l'espère)
+        total_reward = 0
+        step = 0
+        
+        while step < MAX_STEPS_PER_EPISODE:
+            step += 1
+            
+            # A. DÉCISION (Le Cerveau choisit)
+            action_idx = neuro_agent.select_action(current_state)
+            
+            # B. ACTION (Le Corps exécute)
+            muscles.execute(action_idx)
+            
+            # C. DÉLAI DE RÉACTION & OBSERVATION
+            # On laisse un tout petit temps au jeu pour réagir (physique)
+            # Si le jeu tourne à 60FPS, 1 frame = ~0.016s.
+            # On ne veut pas spammer trop vite.
+            # time.sleep(0.01) # Optionnel, dépend de la vitesse de votre machine
+            
+            next_state_raw = eye.get_state()
+            next_state = transmute_state(next_state_raw)
+            
+            # D. PERCEPTION DE LA RÉCOMPENSE (Amygdale)
+            current_hp, _ = amygdala.read_hp()
+            reward = 0
+            done = False
+            
+            # Logique de Survie (Heuristique)
+            # 1. Calcul de la différence de vie
+            hp_delta = current_hp - last_hp
+            
+            if hp_delta < -0.01: # Perte de vie significative (Filtrage du bruit)
+                # Si on passe brutalement à 0 alors qu'on avait de la vie -> MORT
+                if current_hp == 0 and last_hp > 0.1:
+                    reward = REWARD_DEATH
+                    done = True
+                    print("💀 MORT DETECTÉE.")
+                else:
+                    # Dégâts standard
+                    reward = REWARD_DAMAGE * abs(hp_delta) # Plus on a mal, plus c'est punitif
+                    # print(f"🩸 Dégâts reçus ! Reward: {reward:.2f}")
+            
+            elif current_hp == 0 and last_hp < 0.1:
+                # On était déjà mort ou presque, et on reste à 0
+                # C'est la fin de l'épisode (ou l'attente du respawn)
+                done = True
+            
+            elif current_hp == 0 and last_hp > 0.1:
+                 # Cas étrange : HUD disparait alors qu'on allait bien -> VICTOIRE ?
+                 # Dans le doute, on considère cela comme une fin d'épisode positive
+                 reward = REWARD_WIN
+                 done = True
+                 print("🏆 VICTOIRE PROBABLE (Disparition HUD).")
+            
+            else:
+                # On est en vie et stable
+                reward = REWARD_SURVIVAL
+
+            # Mise à jour de la mémoire immédiate
+            last_hp = current_hp
+            total_reward += reward
+
+            # E. MÉMORISATION (Replay Buffer)
+            # On stocke l'expérience dans l'hippocampe
+            neuro_agent.memory.push(current_state, action_idx, reward, next_state, done)
+
+            # F. APPRENTISSAGE (Plasticité Synaptique)
+            # L'agent rêve et optimise ses poids
+            loss = neuro_agent.learn()
+            
+            # Transition d'état
+            current_state = next_state
+            
+            # Affichage périodique (monitoring)
+            if step % 100 == 0:
+                print(f"Step {step} | Epsilon: {neuro_agent.epsilon:.3f} | HP: {current_hp:.2f}")
+
+            if done:
+                break
+        
+        # Fin de l'épisode
+        neuro_agent.update_target_network()
+        print(f"Fin Épisode {episode}. Reward Total: {total_reward:.2f}. Steps: {step}")
+        
+        if episode % SAVE_INTERVAL == 0:
+            neuro_agent.save(MODEL_FILE)
+            print("💾 Cerveau sauvegardé.")
+            
+        # Pause pour laisser le jeu recharger (Menu, Replay...)
+        # Vous devrez peut-être appuyer manuellement sur 'A' pour relancer une partie
+        # ou coder une fonction "press_continue" aveugle.
+        time.sleep(3) 
 
 if __name__ == "__main__":
-    run_full_sensory_test()
+    main()
