@@ -46,7 +46,7 @@ class BioMonitor:
         self.hp_buffer = deque(maxlen=15)
         
         # On stocke le nombre max de pixels possibles pour normaliser (0.0 à 1.0)
-        self.max_pixels = self.monitor["width"] * self.monitor["height"]
+        self.max_pixels = 900 # on Utilise 900 car c'est le nombre de pixels de la barre de vie. Sinon on devrait utiliser: self.monitor["width"] * self.monitor["height"]
 
     def read_hp(self):
         """
