@@ -3,6 +3,7 @@ import mss
 import numpy as np
 import ctypes
 from ctypes import wintypes
+import config
 
 # --- VOTRE FONCTION DE DÉTECTION (Je la réutilise, elle est parfaite) ---
 def get_game_window(title):
@@ -24,7 +25,7 @@ def get_game_window(title):
     }
 
 def calibrate_pain_receptor():
-    window_title = "LLBlaze" # Assurez-vous que c'est le bon titre
+    window_title = config.WINDOW_TITLE # Assurez-vous que c'est le bon titre
     game_window = get_game_window(window_title)
     
     if not game_window:

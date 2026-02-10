@@ -6,15 +6,10 @@ import random
 from collections import deque
 from brain import Brain  # On importe votre cerveau validé
 
+import config
+
 # --- HYPERPARAMÈTRES GÉNÉTIQUES ---
-BATCH_SIZE = 32         # Combien de souvenirs on ressasse à la fois
-GAMMA = 0.99            # Facteur d'actualisation (L'importance du futur vs immédiat)
-EPSILON_START = 1.0     # 100% exploration au début (Bébé ne sait rien)
-EPSILON_END = 0.02      # 2% exploration à la fin (Reste un peu curieux)
-EPSILON_DECAY = 10000   # Vitesse de réduction de la curiosité
-TARGET_UPDATE = 1000    # On met à jour le cerveau "Cible" tous les 1000 pas
-LEARNING_RATE = 1e-4    # Vitesse d'apprentissage (Neuroplasticité)
-MEMORY_SIZE = 10000     # Capacité de l'Hippocampe
+# Valeurs déplacées dans config.py
 
 class ReplayBuffer:
     """
@@ -50,11 +45,11 @@ class Agent:
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval() # Le Target Net ne s'entraîne pas directement
 
-        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=LEARNING_RATE)
-        self.memory = ReplayBuffer(MEMORY_SIZE)
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=config.LEARNING_RATE)
+        self.memory = ReplayBuffer(config.MEMORY_SIZE)
 
         self.steps_done = 0
-        self.epsilon = EPSILON_START
+        self.epsilon = config.EPSILON_START
 
     def select_action(self, state):
         """
@@ -62,8 +57,8 @@ class Agent:
         Soit on explore (Action aléatoire), soit on exploite (Meilleure Q-Value).
         """
         # Mise à jour du taux d'exploration
-        self.epsilon = EPSILON_END + (EPSILON_START - EPSILON_END) * \
-                       np.exp(-1. * self.steps_done / EPSILON_DECAY)
+        self.epsilon = config.EPSILON_END + (config.EPSILON_START - config.EPSILON_END) * \
+                       np.exp(-1. * self.steps_done / config.EPSILON_DECAY)
         self.steps_done += 1
 
         # EXPLOITATION (Cerveau)
@@ -83,11 +78,11 @@ class Agent:
         Le cœur de l'apprentissage (Backpropagation).
         C'est ici que la magie mathématique opère.
         """
-        if len(self.memory) < BATCH_SIZE:
+        if len(self.memory) < config.BATCH_SIZE:
             return # Pas assez de souvenirs pour apprendre
 
         # 1. On rêve (Récupération d'un batch)
-        states, actions, rewards, next_states, dones = self.memory.sample(BATCH_SIZE)
+        states, actions, rewards, next_states, dones = self.memory.sample(config.BATCH_SIZE)
 
         # Conversion en tenseurs PyTorch
         state_batch = torch.tensor(states, dtype=torch.float32).to(self.device)
@@ -107,7 +102,7 @@ class Agent:
         
         # Formule de Bellman : R + gamma * max(Q_next) * (1 - done)
         # Si done est vrai (1), le futur vaut 0 (car le jeu est fini)
-        expected_q_values = reward_batch + (GAMMA * next_q_values * (1 - done_batch))
+        expected_q_values = reward_batch + (config.GAMMA * next_q_values * (1 - done_batch))
 
         # 4. Calcul de la perte (Huber Loss ou MSE)
         # On compare la prédiction (q_values) avec la cible (expected_q_values)

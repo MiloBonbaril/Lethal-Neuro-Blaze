@@ -4,18 +4,8 @@ import torch.nn.functional as F
 import pydirectinput
 import time
 
-# --- CONFIGURATION DU CORTEX MOTEUR ---
-# Mapping : Index Neuronal -> Touche Clavier
-# Assurez-vous que ces touches correspondent à votre configuration dans le jeu !
-ACTION_MAP = {
-    0: None,            # No-Op
-    1: 'left',
-    2: 'right',
-    3: 'space',         # Saut
-    4: 'c',             # Frappe (Swing)
-    5: 'x',             # Bunt
-    6: 'z'              # Grab
-}
+import config
+
 
 class MotorCortex:
     """
@@ -29,7 +19,7 @@ class MotorCortex:
         """
         Traduit l'intention (0-5) en signal électrique (touche).
         """
-        key = ACTION_MAP.get(action_idx)
+        key = config.ACTION_MAP.get(action_idx)
         
         if key is None:
             return # On ne fait rien
@@ -87,7 +77,8 @@ class Brain(nn.Module):
 if __name__ == "__main__":
     # Simulation d'un cerveau
     input_shape = (4, 84, 84)
-    num_actions = len(ACTION_MAP) - 1
+    input_shape = (4, 84, 84)
+    num_actions = len(config.ACTION_MAP) - 1
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     print(f"🧠 Initialisation du cerveau sur : {device}")

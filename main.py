@@ -7,25 +7,11 @@ import pydirectinput
 
 # Importation de vos organes
 from senses import TemporalRetina, BioMonitor, get_game_window
-from brain import MotorCortex, ACTION_MAP
+from brain import MotorCortex
 from agent import Agent
+import config
 
-# --- HYPERPARAMÈTRES OPTIMISÉS ---
-WINDOW_TITLE = "LLBlaze"
-EPISODES = 1000
-MAX_STEPS_PER_EPISODE = 4000 
-SAVE_INTERVAL = 3
-MODEL_FILE = "neuro_blaze_v1.pth"
-FRAME_SKIP = 1  # L'IA réfléchit 1 fois, agit 4 fois. (Gain FPS majeur)
 
-# Touche pour passer les menus (souvent Saut/Espace ou Frappe)
-MENU_KEY = 'space' 
-
-# Récompenses
-REWARD_SURVIVAL = 0.01      # Réduit car on va l'accumuler sur 4 frames
-REWARD_DAMAGE = -50.0
-REWARD_DEATH = -100.0
-REWARD_WIN = 100.0
 
 def transmute_state(numpy_state):
     """ (84, 84, 4) -> (4, 84, 84) pour PyTorch """
@@ -37,7 +23,7 @@ def wait_for_resurrection(amygdala, muscles):
     Tant que la vie est à 0, on spamme la touche MENU et on attend.
     """
     print("💤 En attente de résurrection (Navigation Menu)...")
-    pydirectinput.keyUp(MENU_KEY) # Sécurité
+    pydirectinput.keyUp(config.MENU_KEY) # Sécurité
     
     no_hp_counter = 0
     
@@ -56,7 +42,7 @@ def wait_for_resurrection(amygdala, muscles):
         
         # On appuie sur Espace toutes les ~0.5 secondes pour passer les dialogues/menus
         if no_hp_counter % 10 == 0:
-            pydirectinput.press(MENU_KEY)
+            pydirectinput.press(config.MENU_KEY)
             print(".", end="", flush=True)
             
         time.sleep(0.05) # On ne surcharge pas le CPU pendant l'attente
@@ -64,7 +50,7 @@ def wait_for_resurrection(amygdala, muscles):
 def main():
     print("🧬 INITIALISATION DU PROJET LETHAL NEURO-BLAZE (OPTIMISÉ)...")
 
-    game_geo = get_game_window(WINDOW_TITLE)
+    game_geo = get_game_window(config.WINDOW_TITLE)
     if not game_geo:
         print("❌ ERREUR : Jeu introuvable.")
         return
@@ -73,19 +59,19 @@ def main():
     amygdala = BioMonitor(game_geo)
     muscles = MotorCortex()
     
-    input_shape = (4, 84, 84) 
-    num_actions = len(ACTION_MAP)
+    input_shape = config.INPUT_SHAPE
+    num_actions = len(config.ACTION_MAP)
     neuro_agent = Agent(input_shape, num_actions)
 
-    if os.path.exists(MODEL_FILE):
-        print(f"📂 Chargement du cerveau : {MODEL_FILE}")
-        neuro_agent.load(MODEL_FILE)
+    if os.path.exists(config.MODEL_FILE):
+        print(f"📂 Chargement du cerveau : {config.MODEL_FILE}")
+        neuro_agent.load(config.MODEL_FILE)
     
     print(f"\n🧠 DÉBUT DE L'ENTRAÎNEMENT")
     print(">>> PLACEZ LE JEU EN PREMIER PLAN <<<")
     time.sleep(5)
 
-    for episode in range(1, EPISODES + 1):
+    for episode in range(1, config.EPISODES + 1):
         # 1. ATTENTE ACTIVE (On ne commence que si on est VIVANT)
         wait_for_resurrection(amygdala, muscles)
         
@@ -101,7 +87,7 @@ def main():
         step = 0
         done = False
         
-        while step < MAX_STEPS_PER_EPISODE and not done:
+        while step < config.MAX_STEPS_PER_EPISODE and not done:
             step += 1
             
             # A. DÉCISION (1 fois toutes les 4 frames)
@@ -111,7 +97,7 @@ def main():
             # On maintient l'action et on observe le résultat cumulé
             accumulated_reward = 0
             
-            for _ in range(FRAME_SKIP):
+            for _ in range(config.FRAME_SKIP):
                 # Exécution motrice
                 muscles.execute(action_idx)
                 
@@ -129,17 +115,17 @@ def main():
                 # Logique de vie/mort (identique à avant)
                 if hp_delta < -0.01:
                     if current_hp == 0 and last_hp > 0.1:
-                        r = REWARD_DEATH
+                        r = config.REWARD_DEATH
                         done = True
                     else:
-                        r = REWARD_DAMAGE * abs(hp_delta)
+                        r = config.REWARD_DAMAGE * abs(hp_delta)
                 elif current_hp == 0 and last_hp < 0.1:
                     done = True # Déjà mort
                 elif current_hp == 0 and last_hp > 0.1:
-                    r = REWARD_WIN # HUD disparu subitement
+                    r = config.REWARD_WIN # HUD disparu subitement
                     done = True
                 else:
-                    r = REWARD_SURVIVAL
+                    r = config.REWARD_SURVIVAL
                 
                 accumulated_reward += r
                 last_hp = current_hp
@@ -161,14 +147,14 @@ def main():
             
             # Monitoring léger
             if step % 50 == 0:
-                print(f"Step {step} (x{FRAME_SKIP}) | Eps: {neuro_agent.epsilon:.2f} | HP: {last_hp:.2f} | R: {accumulated_reward:.1f}")
+                print(f"Step {step} (x{config.FRAME_SKIP}) | Eps: {neuro_agent.epsilon:.2f} | HP: {last_hp:.2f} | R: {accumulated_reward:.1f}")
 
         # Fin de l'épisode
         neuro_agent.update_target_network()
         print(f"💀 Fin Épisode {episode}. Score: {total_reward:.2f}")
         
-        if episode % SAVE_INTERVAL == 0:
-            neuro_agent.save(MODEL_FILE)
+        if episode % config.SAVE_INTERVAL == 0:
+            neuro_agent.save(config.MODEL_FILE)
             print("💾 Sauvegarde synaptique.")
 
 if __name__ == "__main__":

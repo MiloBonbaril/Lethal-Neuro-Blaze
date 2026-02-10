@@ -7,11 +7,10 @@ from ctypes import wintypes
 from collections import deque
 
 # --- CONFIGURATION GÉNÉTIQUE ---
-WINDOW_TITLE = "LLBlaze"
-# Vos valeurs calibrées
-HP_ROI_RELATIVE = {'top': 76, 'left': 94, 'width': 190, 'height': 69}
-LOWER_YELLOW = np.array([27, 158, 151])
-UPPER_YELLOW = np.array([38, 246, 250])
+import config
+
+# --- CONFIGURATION GÉNÉTIQUE ---
+# Valeurs déplacées dans config.py
 
 # --- FONCTIONS UTILITAIRES ---
 def get_game_window(title):
@@ -33,10 +32,10 @@ class BioMonitor:
         """
         # Calcul des coordonnées absolues de la ROI de vie
         self.monitor = {
-            "top": game_window_abs["top"] + HP_ROI_RELATIVE["top"],
-            "left": game_window_abs["left"] + HP_ROI_RELATIVE["left"],
-            "width": HP_ROI_RELATIVE["width"],
-            "height": HP_ROI_RELATIVE["height"]
+            "top": game_window_abs["top"] + config.HP_ROI_RELATIVE["top"],
+            "left": game_window_abs["left"] + config.HP_ROI_RELATIVE["left"],
+            "width": config.HP_ROI_RELATIVE["width"],
+            "height": config.HP_ROI_RELATIVE["height"]
         }
         
         self.sct = mss.mss()
@@ -59,7 +58,7 @@ class BioMonitor:
         hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
         
         # 2. Masquage
-        mask = cv2.inRange(hsv, LOWER_YELLOW, UPPER_YELLOW)
+        mask = cv2.inRange(hsv, config.LOWER_YELLOW, config.UPPER_YELLOW)
         
         # 3. Comptage brut
         current_pixels = cv2.countNonZero(mask)
@@ -104,7 +103,7 @@ class TemporalRetina:
 
 # --- CORPS PRINCIPAL (TEST D'INTÉGRATION) ---
 def run_full_sensory_test():
-    window_geo = get_game_window(WINDOW_TITLE)
+    window_geo = get_game_window(config.WINDOW_TITLE)
     if not window_geo:
         print("❌ Jeu introuvable.")
         return

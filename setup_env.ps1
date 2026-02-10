@@ -20,6 +20,9 @@ if ($env:VIRTUAL_ENV) {
     Write-Host "WARNING: Virtual environment activation might have failed. Using direct paths for installation."
 }
 
+Write-Host "Upgrading pip..."
+pip install --upgrade pip
+
 # 3. Install dependencies
 Write-Host "Installing opencv-python, pydirectinput, mss..."
 pip install opencv-python pydirectinput mss
