@@ -87,7 +87,7 @@ class Environment:
             current_hp, _ = self.amygdala.read_hp()
             
             # 3. Calcul de la récompense intermédiaire
-            r = 0
+            r = 0.0
             hp_delta = current_hp - self.last_hp
             
             # Logique de vie/mort

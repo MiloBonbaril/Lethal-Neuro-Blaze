@@ -1,4 +1,5 @@
 import torch
+import os
 import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
@@ -122,9 +123,40 @@ class Agent:
         """Synchronise le Target Net avec le Policy Net."""
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
-    def save(self, filename):
-        torch.save(self.policy_net.state_dict(), filename)
+    def save(self, filename, episode, best_reward):
+        """
+        Sauvegarde le cerveau et tout l'état de l'agent.
+        """
+        checkpoint = {
+            'model_state': self.policy_net.state_dict(),
+            'optimizer_state': self.optimizer.state_dict(),
+            'epsilon': self.epsilon,
+            'episode': episode,
+            'best_reward': best_reward
+        }
+        torch.save(checkpoint, filename)
 
     def load(self, filename):
-        self.policy_net.load_state_dict(torch.load(filename))
-        self.target_net.load_state_dict(self.policy_net.state_dict())
+        """
+        Charge le cerveau. Gère la rétrocompatibilité (si ancien format).
+        Retourne (start_episode, best_reward).
+        """
+        if not os.path.exists(filename):
+            return 1, -float('inf')
+
+        checkpoint = torch.load(filename)
+        
+        # Vérification : Est-ce un dictionnaire complet ou juste le state_dict (ancien format) ?
+        if isinstance(checkpoint, dict) and 'model_state' in checkpoint:
+            print("📦 Chargement d'un Checkpoint COMPLET.")
+            self.policy_net.load_state_dict(checkpoint['model_state'])
+            self.target_net.load_state_dict(checkpoint['model_state'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state'])
+            self.epsilon = checkpoint['epsilon']
+            return checkpoint['episode'] + 1, checkpoint['best_reward']
+        else:
+            print("⚠️ Attention : Chargement d'un modèle LEGACY (Poids seuls).")
+            # C'est l'ancien format (juste les poids)
+            self.policy_net.load_state_dict(checkpoint)
+            self.target_net.load_state_dict(checkpoint)
+            return 1, -float('inf')

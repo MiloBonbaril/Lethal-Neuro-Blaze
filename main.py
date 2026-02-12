@@ -17,15 +17,18 @@ def main():
     num_actions = len(config.ACTION_MAP)
     neuro_agent = Agent(input_shape, num_actions)
 
+    start_episode = 1
+    best_reward = -float('inf')
+
     if os.path.exists(config.MODEL_FILE):
         print(f"📂 Chargement du cerveau : {config.MODEL_FILE}")
-        neuro_agent.load(config.MODEL_FILE)
+        start_episode, best_reward = neuro_agent.load(config.MODEL_FILE)
     
-    print(f"\n🧠 DÉBUT DE L'ENTRAÎNEMENT")
+    print(f"\n🧠 DÉBUT DE L'ENTRAÎNEMENT (Épisode {start_episode}/{config.EPISODES})")
     print(">>> PLACEZ LE JEU EN PREMIER PLAN <<<")
     time.sleep(5)
 
-    for episode in range(1, config.EPISODES + 1):
+    for episode in range(start_episode, config.EPISODES + 1):
         # 1. RESET (Attente résurrection + Initialisation)
         current_state = env.reset()
         
@@ -59,9 +62,12 @@ def main():
         # Fin de l'épisode
         neuro_agent.update_target_network()
         print(f"💀 Fin Épisode {episode}. Score: {total_reward:.2f}")
+
+        if total_reward > best_reward:
+            best_reward = total_reward
         
         if episode % config.SAVE_INTERVAL == 0:
-            neuro_agent.save(config.MODEL_FILE)
+            neuro_agent.save(config.MODEL_FILE, episode, best_reward)
             print("💾 Sauvegarde synaptique.")
 
 if __name__ == "__main__":
