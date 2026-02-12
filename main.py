@@ -3,11 +3,14 @@ import os
 import config
 from agent import Agent
 from environment import Environment
+from torch.utils.tensorboard import SummaryWriter
+import torch # For grid_sample or other utils if needed
 
 import argparse
 import sys
 
 def run_training(env, neuro_agent, start_episode, best_reward):
+    writer = SummaryWriter(log_dir="runs/LethalNeuroBlaze_Experiment_1")
     print(f"\n🧠 DÉBUT DE L'ENTRAÎNEMENT (Épisode {start_episode}/{config.EPISODES})")
     print(">>> PLACEZ LE JEU EN PREMIER PLAN <<<")
     time.sleep(5)
@@ -16,6 +19,21 @@ def run_training(env, neuro_agent, start_episode, best_reward):
         # 1. RESET (Attente résurrection + Initialisation)
         current_state = env.reset()
         
+        # Log de l'image vue par l'agent (au début de l'épisode)
+        # current_state shape: (4, 84, 84) -> TensorBoard veut (C, H, W) ou (N, C, H, W)
+        # On va juste logger le premier channel (ou tout)
+        # Comme c'est du N&B empilé, on peut visualiser les 3 premiers channels comme RGB ou juste 1.
+        # Pour simplifier, on envoie tout le bloc (le writer gere le multichannel parfois ou on prend le dernier frame)
+        # On va prendre le dernier frame (le plus récent) pour la visibilité : current_state[-1]
+        
+        # Astuce : make_grid pour voir les 4 frames ? Ou juste le dernier.
+        # Voyons simple : Le dernier frame (l'instant présent).
+        # current_state est un Tensor ou numpy ? reset retourne un Tensor cpu ou numpy... ah environment.py step retourne numpy (C, H, W) ?
+        # environment.py (reset) -> _transmute_state -> transpose (C, H, W) numpy array.
+        
+        last_frame = current_state[-1, :, :] # (84, 84)
+        writer.add_image("Vision/Input", last_frame, episode, dataformats='HW')
+
         total_reward = 0
         step = 0
         done = False
@@ -37,6 +55,10 @@ def run_training(env, neuro_agent, start_episode, best_reward):
             neuro_agent.memory.push(current_state, action_idx, reward, next_state, done)
             loss = neuro_agent.learn()
             
+            if loss is not None:
+                writer.add_scalar("Loss/Train", loss, neuro_agent.steps_done)
+                writer.add_scalar("Epsilon/Step", neuro_agent.epsilon, neuro_agent.steps_done)
+            
             current_state = next_state
             
             # Monitoring léger
@@ -45,6 +67,11 @@ def run_training(env, neuro_agent, start_episode, best_reward):
 
         # Fin de l'épisode
         neuro_agent.update_target_network()
+        
+        writer.add_scalar("Reward/Episode", total_reward, episode)
+        writer.add_scalar("Health/Last_HP", info['hp'], episode) # HP à la fin (ou moyenne ?)
+        writer.add_scalar("Epsilon/Episode", neuro_agent.epsilon, episode)
+        
         print(f"💀 Fin Épisode {episode}. Score: {total_reward:.2f}")
 
         if total_reward > best_reward:
@@ -53,6 +80,8 @@ def run_training(env, neuro_agent, start_episode, best_reward):
         if episode % config.SAVE_INTERVAL == 0:
             neuro_agent.save(config.MODEL_FILE, episode, best_reward)
             print("💾 Sauvegarde synaptique.")
+    
+    writer.close()
 
 def run_inference(env, neuro_agent):
     print(f"\n🧠 MODE EXÉCUTION (INFERENCE ONLY)")
