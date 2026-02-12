@@ -144,7 +144,7 @@ class Agent:
         if not os.path.exists(filename):
             return 1, -float('inf')
 
-        checkpoint = torch.load(filename)
+        checkpoint = torch.load(filename, weights_only=False)
         
         # Vérification : Est-ce un dictionnaire complet ou juste le state_dict (ancien format) ?
         if isinstance(checkpoint, dict) and 'model_state' in checkpoint:
