@@ -43,6 +43,8 @@ class BioMonitor:
         # Buffer pour lisser le signal (Anti-Clignotement et Anti-VFX)
         # 15 frames à ~30fps = 0.5 secondes de mémoire tampon
         self.hp_buffer = deque(maxlen=15)
+
+        self.hp_threatened = deque(maxlen=15)
         
         # On stocke le nombre max de pixels possibles pour normaliser (0.0 à 1.0)
         self.max_pixels = 900 # on Utilise 900 car c'est le nombre de pixels de la barre de vie. Sinon on devrait utiliser: self.monitor["width"] * self.monitor["height"]
@@ -75,8 +77,14 @@ class BioMonitor:
         # On multiplie par un facteur arbitraire si la barre ne remplit pas tout le rectangle
         # Pour l'instant, on renvoie le ratio brut par rapport à la taille de la zone.
         hp_ratio = smoothed_pixels / self.max_pixels
+
+        # If the lifebar flashes empty, it means the ball can kill you.
+        if min(self.hp_buffer) < (self.max_pixels * 0.1) and hp_ratio > 0.01:
+            self.hp_threatened.append(True)
+        else:
+            self.hp_threatened.append(False)
         
-        return hp_ratio, mask # On retourne le mask pour le debug
+        return hp_ratio, mask, max(self.hp_threatened) # On retourne le mask pour le debug
 
 # --- CLASSE 2 : LA RÉTINE (Déjà validée) ---
 class TemporalRetina:
@@ -119,7 +127,7 @@ def run_full_sensory_test():
         vision_state = eye.get_state()
         
         # 2. Perception Interne (Proprioception / Douleur)
-        hp_percent, hp_mask = amygdala.read_hp()
+        hp_percent, hp_mask, hp_threatened = amygdala.read_hp()
         
         # --- DEBUG VISUALISATION ---
         # Vue Rétine (Dernière frame)

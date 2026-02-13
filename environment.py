@@ -37,7 +37,7 @@ class Environment:
             self.eye.get_state()
             
         current_state_raw = self.eye.get_state()
-        self.last_hp, _ = self.amygdala.read_hp()
+        self.last_hp, _, _ = self.amygdala.read_hp()
         
         return self._transmute_state(current_state_raw)
 
@@ -52,7 +52,7 @@ class Environment:
         no_hp_counter = 0
         
         while True:
-            hp, _ = self.amygdala.read_hp()
+            hp, _, _ = self.amygdala.read_hp()
             
             # Si la vie revient (plus de 5% pour être sûr que ce n'est pas du bruit)
             if hp > 0.05:
@@ -84,7 +84,7 @@ class Environment:
             
             # 2. Observation immédiate
             next_state_raw = self.eye.get_state()
-            current_hp, _ = self.amygdala.read_hp()
+            current_hp, _, hp_threatened = self.amygdala.read_hp()
             
             # 3. Calcul de la récompense intermédiaire
             r = 0.0
@@ -92,16 +92,16 @@ class Environment:
             
             # Logique de vie/mort
             if hp_delta < -0.01:
-                if current_hp == 0 and self.last_hp > 0.1:
+                if current_hp == 0 and hp_threatened:
                     r = config.REWARD_DEATH
+                    done = True
+                elif current_hp == 0 and not hp_threatened:
+                    r = 0 # TODO: On ne peut pas récompenser si on ne sait pas précisément l'état de la mort, donc on fait comme s'il y avait égalité.
                     done = True
                 else:
                     r = config.REWARD_DAMAGE * abs(hp_delta)
-            elif current_hp == 0 and self.last_hp < 0.1:
+            elif current_hp == 0:
                 done = True # Déjà mort
-            elif current_hp == 0 and self.last_hp > 0.1:
-                r = config.REWARD_WIN # HUD disparu subitement alors qu'on avait de la vie
-                done = True
             else:
                 r = config.REWARD_SURVIVAL
             

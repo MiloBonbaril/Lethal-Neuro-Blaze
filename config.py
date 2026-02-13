@@ -25,7 +25,7 @@ MODEL_FILE = "neuro_blaze_v1.pth"
 INPUT_SHAPE = (4, 84, 84) # (Channels, Height, Width)
 
 # --- REWARDS ---
-REWARD_SURVIVAL = 0.01      # Réduit car on va l'accumuler sur 4 frames
+REWARD_SURVIVAL = 0.1
 REWARD_DAMAGE = -50.0
 REWARD_DEATH = -100.0
 REWARD_WIN = 100.0
@@ -46,5 +46,5 @@ ACTION_MAP = {
     3: 'space',         # Saut
     4: 'c',             # Frappe (Swing)
     5: 'x',             # Bunt
-    6: 'z'              # Grab
+    6: 'w'              # Grab
 }

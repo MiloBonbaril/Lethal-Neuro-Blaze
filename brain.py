@@ -23,6 +23,9 @@ class MotorCortex:
         
         if key is None:
             return # On ne fait rien
+
+        if action_idx == 6: # 6 est l'index du Grab
+            print(">>> TENTATIVE DE GRAB (NEURONE 6 ACTIVÉ) <<<")
             
         # Impulsion nerveuse rapide
         # pydirectinput est nécessaire pour DirectX/Vulkan games
