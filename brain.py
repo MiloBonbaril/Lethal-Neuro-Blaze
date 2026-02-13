@@ -3,33 +3,67 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pydirectinput
 import time
+from collections import Counter
 
 import config
 
-
 class MotorCortex:
-    """
-    L'interface entre la décision neuronale et le clavier virtuel.
-    """
     def __init__(self):
-        pydirectinput.FAILSAFE = False # Désactive la sécurité souris coin écran
-        print("💪 Cortex Moteur connecté aux touches.")
+        pydirectinput.FAILSAFE = False
+        # On stocke un SET (ensemble) de touches actuellement enfoncées
+        self.current_keys = set() 
+        print("💪 Cortex Moteur Avancé (Polyvalent) connecté.")
 
-    def execute(self, action_idx):
-        """
-        Traduit l'intention (0-5) en signal électrique (touche).
-        """
-        key = config.ACTION_MAP.get(action_idx)
+    def execute(self, action_idx, action_map):
+        target_action = action_map.get(action_idx)
         
-        if key is None:
-            return # On ne fait rien
-
-        if action_idx == 6: # 6 est l'index du Grab
-            print(">>> TENTATIVE DE GRAB (NEURONE 6 ACTIVÉ) <<<")
+        # 1. Déterminer quelles touches DOIVENT être enfoncées ou tappées
+        target_keys = set()
+        multi_tap_keys = [] # Liste de tuples (key, count)
+        
+        if target_action is None:
+            pass # Aucune touche
+        elif isinstance(target_action, list):
+            # Compter les occurrences de chaque touche
+            counts = Counter(target_action)
             
-        # Impulsion nerveuse rapide
-        # pydirectinput est nécessaire pour DirectX/Vulkan games
-        pydirectinput.press(key)
+            for k, count in counts.items():
+                if count > 1:
+                    multi_tap_keys.append((k, count))
+                else:
+                    target_keys.add(k)
+        else:
+            target_keys.add(target_action) # Une seule touche
+
+        # 2. Différentiel (Quoi relâcher ? Quoi appuyer ?)
+        
+        # Touches à relâcher : Celles qui étaient là AVANT mais pas MAINTENANT
+        keys_to_release = self.current_keys - target_keys
+        
+        # Touches à appuyer : Celles qui sont là MAINTENANT mais pas AVANT
+        keys_to_press = target_keys - self.current_keys
+        
+        # 3. Exécution physique
+        
+        # A. Relâcher les anciennes touches maintenues
+        for k in keys_to_release:
+            pydirectinput.keyUp(k)
+            
+        # B. Appuyer sur les nouvelles touches à maintenir
+        for k in keys_to_press:
+            pydirectinput.keyDown(k)
+            
+        # C. Gérer les multi-taps (ex: ['c', 'c'])
+        for k, count in multi_tap_keys:
+            pydirectinput.press(k, presses=count, interval=0.05)
+            
+        # 4. Mise à jour de la mémoire d'état (uniquement pour les touches maintenues)
+        self.current_keys = target_keys
+
+    def release_all(self):
+        for k in self.current_keys:
+            pydirectinput.keyUp(k)
+        self.current_keys = set()
 
 # --- ARCHITECTURE DU CERVEAU (DQN) ---
 class Brain(nn.Module):

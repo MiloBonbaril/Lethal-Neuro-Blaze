@@ -80,7 +80,7 @@ class Environment:
         
         for _ in range(config.FRAME_SKIP):
             # 1. Exécution motrice
-            self.muscles.execute(action_idx)
+            self.muscles.execute(action_idx, config.ACTION_MAP)
             
             # 2. Observation immédiate
             next_state_raw = self.eye.get_state()

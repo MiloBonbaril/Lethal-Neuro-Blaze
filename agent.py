@@ -134,7 +134,7 @@ class Agent:
             'episode': episode,
             'best_reward': best_reward
         }
-        torch.save(checkpoint, filename)
+        torch.save(checkpoint, filename + f"_e{episode}" + ".pth")
 
     def load(self, filename):
         """
